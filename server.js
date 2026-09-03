@@ -29,7 +29,25 @@ function ensureBundledGame(){
   if(!fs.existsSync(indexPath)) throw new Error('No se pudo reconstruir public/index.html.');
   console.log('✅ Interfaz completa de Villano’s Edition V8 reconstruida.');
 }
+
+// Corrige un error de la V8 original: el cliente de Socket.IO y el código
+// multijugador estaban dentro de la misma etiqueta <script src>, por lo que
+// el navegador ignoraba createOnlineRoom(), joinOnlineRoom(), etc.
+function patchMultiplayerClient(){
+  const indexPath = path.join(__dirname,'public','index.html');
+  if(!fs.existsSync(indexPath)) return;
+  let html = fs.readFileSync(indexPath,'utf8');
+  const broken = '<script src="/socket.io/socket.io.js">';
+  const fixed = '<script src="/socket.io/socket.io.js"></script>\n<script>';
+  if(html.includes(broken) && !html.includes(fixed)){
+    html = html.replace(broken,fixed);
+    fs.writeFileSync(indexPath,html,'utf8');
+    console.log('✅ Cliente multijugador V8 corregido.');
+  }
+}
+
 ensureBundledGame();
+patchMultiplayerClient();
 
 const app = express();
 const server = http.createServer(app);
@@ -45,7 +63,10 @@ const TOKENS = ['🎒','☕','📱','🚐'];
 
 app.use(express.static(path.join(__dirname, 'public'), {
   etag: true,
-  maxAge: '1h'
+  maxAge: '1h',
+  setHeaders(res,filePath){
+    if(filePath.endsWith('index.html')) res.setHeader('Cache-Control','no-store');
+  }
 }));
 app.get('/health', (_req,res)=>res.json({ok:true,rooms:rooms.size}));
 
@@ -100,6 +121,7 @@ io.on('connection', socket => {
     const room=rooms.get(code);
     if(!room)return ack({ok:false,error:'La sala no existe o ya expiró.'});
 
+    // Reconexión por clave persistente.
     let idx=existingKey ? room.players.findIndex(p=>p.key===existingKey) : -1;
     if(idx>=0){
       room.players[idx].socketId=socket.id;
@@ -143,6 +165,7 @@ io.on('connection', socket => {
     if(!room.started)return ack({ok:false,error:'La partida no ha empezado.'});
     if(!state||!Array.isArray(state.players)||!Array.isArray(state.spaces))return ack({ok:false,error:'Estado inválido.'});
 
+    // Modelo simple pero útil: solo el jugador cuyo turno estaba activo puede publicar el siguiente estado.
     const expected = room.state ? Number(room.state.currentPlayer) : 0;
     if(idx!==expected)return ack({ok:false,error:'No es tu turno para modificar la partida.'});
 
@@ -180,6 +203,7 @@ io.on('connection', socket => {
   });
 });
 
+// Elimina salas vacías/viejas para que el servidor no crezca indefinidamente.
 setInterval(()=>{
   const now=Date.now();
   for(const [code,room] of rooms){
