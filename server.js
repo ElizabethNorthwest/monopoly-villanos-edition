@@ -1,8 +1,33 @@
 const path = require('path');
+const fs = require('fs');
 const crypto = require('crypto');
+const AdmZip = require('adm-zip');
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
+
+// El conector de GitHub de ChatGPT trabaja mejor con texto que con binarios.
+// Por eso la V8 completa viaja en 7 fragmentos base64 dentro de /bundle.
+// Al arrancar en Render se reconstruye el ZIP y se extrae automáticamente.
+function ensureBundledGame(){
+  const indexPath = path.join(__dirname,'public','index.html');
+  if(fs.existsSync(indexPath)) return;
+  const bundleDir = path.join(__dirname,'bundle');
+  const parts = fs.readdirSync(bundleDir)
+    .filter(name => /^v8\.part\d+\.b64$/.test(name))
+    .sort();
+  if(parts.length !== 7){
+    throw new Error(`Paquete V8 incompleto: se esperaban 7 partes y hay ${parts.length}.`);
+  }
+  const b64 = parts.map(name => fs.readFileSync(path.join(bundleDir,name),'utf8').trim()).join('');
+  const zipPath = path.join(__dirname,'.villanos-v8.zip');
+  fs.writeFileSync(zipPath,Buffer.from(b64,'base64'));
+  new AdmZip(zipPath).extractAllTo(__dirname,true);
+  fs.unlinkSync(zipPath);
+  if(!fs.existsSync(indexPath)) throw new Error('No se pudo reconstruir public/index.html.');
+  console.log('✅ Interfaz completa de Villano’s Edition V8 reconstruida.');
+}
+ensureBundledGame();
 
 const app = express();
 const server = http.createServer(app);
