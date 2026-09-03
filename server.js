@@ -6,8 +6,6 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 
-// La interfaz completa de la V8 está guardada como texto base64 dentro de /bundle.
-// Al iniciar en Render se reconstruye y extrae automáticamente.
 function ensureBundledGame(){
   const indexPath = path.join(__dirname,'public','index.html');
   if(fs.existsSync(indexPath)) return;
@@ -30,20 +28,36 @@ function ensureBundledGame(){
   console.log('✅ Interfaz completa de Villano’s Edition V8 reconstruida.');
 }
 
-// Corrige un error de la V8 original: el cliente de Socket.IO y el código
-// multijugador estaban dentro de la misma etiqueta <script src>, por lo que
-// el navegador ignoraba createOnlineRoom(), joinOnlineRoom(), etc.
 function patchMultiplayerClient(){
   const indexPath = path.join(__dirname,'public','index.html');
   if(!fs.existsSync(indexPath)) return;
   let html = fs.readFileSync(indexPath,'utf8');
-  const broken = '<script src="/socket.io/socket.io.js">';
-  const fixed = '<script src="/socket.io/socket.io.js"></script>\n<script>';
-  if(html.includes(broken) && !html.includes(fixed)){
-    html = html.replace(broken,fixed);
-    fs.writeFileSync(indexPath,html,'utf8');
-    console.log('✅ Cliente multijugador V8 corregido.');
+
+  // 1) Cierra correctamente la etiqueta que carga Socket.IO.
+  html = html.replace(
+    '<script src="/socket.io/socket.io.js">',
+    '<script src="/socket.io/socket.io.js"></script>'
+  );
+
+  // 2) La V8 original puso el bloque online en <head>, antes que el motor
+  // principal del juego. Ese bloque usa funciones como renderActionPanel,
+  // saveGame y restartGame que todavía no existen en ese momento. Lo movemos
+  // al final del <body>, después del motor principal.
+  const marker = '<script>\n// ===== V8 · MULTIJUGADOR ONLINE =====';
+  const start = html.indexOf(marker);
+  const headEnd = html.indexOf('</head>');
+  if(start >= 0 && headEnd >= 0 && start < headEnd){
+    const close = html.indexOf('</script>', start);
+    if(close >= 0 && close < headEnd){
+      const end = close + '</script>'.length;
+      const block = html.slice(start,end);
+      html = html.slice(0,start) + html.slice(end);
+      html = html.replace('</body>', `${block}\n</body>`);
+      console.log('✅ Bloque multijugador movido después del motor del juego.');
+    }
   }
+
+  fs.writeFileSync(indexPath,html,'utf8');
 }
 
 ensureBundledGame();
@@ -85,9 +99,7 @@ function publicRoom(r){
     code:r.code,
     started:r.started,
     hostIndex:r.hostIndex,
-    players:r.players.map((p,i)=>({
-      index:i,name:p.name,token:p.token,connected:!!p.socketId
-    }))
+    players:r.players.map((p,i)=>({index:i,name:p.name,token:p.token,connected:!!p.socketId}))
   };
 }
 function findPlayerBySocket(socketId){
@@ -107,10 +119,7 @@ io.on('connection', socket => {
   socket.on('room:create', ({name,playerKey:existingKey}={}, ack=()=>{}) => {
     const code=roomCode();
     const key=existingKey || playerKey();
-    const room={
-      code,started:false,hostIndex:0,state:null,createdAt:Date.now(),
-      players:[{name:normalizeName(name),key,socketId:socket.id,token:TOKENS[0]}]
-    };
+    const room={code,started:false,hostIndex:0,state:null,createdAt:Date.now(),players:[{name:normalizeName(name),key,socketId:socket.id,token:TOKENS[0]}]};
     rooms.set(code,room); socket.join(code);
     ack({ok:true,code,playerIndex:0,playerKey:key,host:true,room:publicRoom(room)});
     broadcastRoom(room);
@@ -120,8 +129,6 @@ io.on('connection', socket => {
     code=String(code||'').toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,6);
     const room=rooms.get(code);
     if(!room)return ack({ok:false,error:'La sala no existe o ya expiró.'});
-
-    // Reconexión por clave persistente.
     let idx=existingKey ? room.players.findIndex(p=>p.key===existingKey) : -1;
     if(idx>=0){
       room.players[idx].socketId=socket.id;
@@ -135,7 +142,6 @@ io.on('connection', socket => {
       }
       return;
     }
-
     if(room.started)return ack({ok:false,error:'La partida ya empezó.'});
     if(room.players.length>=4)return ack({ok:false,error:'La sala ya tiene 4 jugadores.'});
     const key=playerKey(); idx=room.players.length;
@@ -164,11 +170,8 @@ io.on('connection', socket => {
     const {room,idx}=found;
     if(!room.started)return ack({ok:false,error:'La partida no ha empezado.'});
     if(!state||!Array.isArray(state.players)||!Array.isArray(state.spaces))return ack({ok:false,error:'Estado inválido.'});
-
-    // Modelo simple pero útil: solo el jugador cuyo turno estaba activo puede publicar el siguiente estado.
     const expected = room.state ? Number(room.state.currentPlayer) : 0;
     if(idx!==expected)return ack({ok:false,error:'No es tu turno para modificar la partida.'});
-
     room.state=state;
     socket.to(room.code).emit('state:sync',{code:room.code,state:room.state});
     ack({ok:true});
@@ -189,9 +192,7 @@ io.on('connection', socket => {
       if(room.players.length===0){rooms.delete(code);return;}
       if(idx===room.hostIndex)room.hostIndex=0;
       broadcastRoom(room);
-    }else{
-      broadcastRoom(room);
-    }
+    }else broadcastRoom(room);
   });
 
   socket.on('disconnect', () => {
@@ -203,7 +204,6 @@ io.on('connection', socket => {
   });
 });
 
-// Elimina salas vacías/viejas para que el servidor no crezca indefinidamente.
 setInterval(()=>{
   const now=Date.now();
   for(const [code,room] of rooms){
