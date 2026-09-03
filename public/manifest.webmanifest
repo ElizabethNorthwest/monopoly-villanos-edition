@@ -1,0 +1,31 @@
+{
+  "name": "Monopoly: Villano’s Edition",
+  "short_name": "Villano’s",
+  "description": "Monopoly: Villano’s Edition con salas privadas online de 2 a 4 jugadores.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#1f0918",
+  "theme_color": "#7f1734",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
