@@ -6,18 +6,20 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 
-// El conector de GitHub de ChatGPT trabaja mejor con texto que con binarios.
-// Por eso la V8 completa viaja en 7 fragmentos base64 dentro de /bundle.
-// Al arrancar en Render se reconstruye el ZIP y se extrae automáticamente.
+// La interfaz completa de la V8 está guardada como texto base64 dentro de /bundle.
+// Al iniciar en Render se reconstruye y extrae automáticamente.
 function ensureBundledGame(){
   const indexPath = path.join(__dirname,'public','index.html');
   if(fs.existsSync(indexPath)) return;
   const bundleDir = path.join(__dirname,'bundle');
-  const parts = fs.readdirSync(bundleDir)
-    .filter(name => /^v8\.part\d+\.b64$/.test(name))
-    .sort();
-  if(parts.length !== 7){
-    throw new Error(`Paquete V8 incompleto: se esperaban 7 partes y hay ${parts.length}.`);
+  const parts = [
+    'v8.part01.b64',
+    'v8.part02a.b64','v8.part02b.b64',
+    'v8.part03a.b64','v8.part03b.b64',
+    'v8.part04.b64','v8.part05.b64','v8.part06.b64','v8.part07.b64'
+  ];
+  for(const name of parts){
+    if(!fs.existsSync(path.join(bundleDir,name))) throw new Error(`Falta ${name} del paquete V8.`);
   }
   const b64 = parts.map(name => fs.readFileSync(path.join(bundleDir,name),'utf8').trim()).join('');
   const zipPath = path.join(__dirname,'.villanos-v8.zip');
