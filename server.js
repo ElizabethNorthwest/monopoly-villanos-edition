@@ -33,16 +33,14 @@ function patchMultiplayerClient(){
   if(!fs.existsSync(indexPath)) return;
   let html = fs.readFileSync(indexPath,'utf8');
 
-  // 1) Cierra correctamente la etiqueta que carga Socket.IO.
+  // La V8 original mezclaba el script externo de Socket.IO con el bloque
+  // multijugador dentro de la misma etiqueta. Separamos ambos scripts.
   html = html.replace(
     '<script src="/socket.io/socket.io.js">',
-    '<script src="/socket.io/socket.io.js"></script>'
+    '<script src="/socket.io/socket.io.js"></script>\n<script>'
   );
 
-  // 2) La V8 original puso el bloque online en <head>, antes que el motor
-  // principal del juego. Ese bloque usa funciones como renderActionPanel,
-  // saveGame y restartGame que todavía no existen en ese momento. Lo movemos
-  // al final del <body>, después del motor principal.
+  // El bloque online debe ejecutarse después del motor principal del juego.
   const marker = '<script>\n// ===== V8 · MULTIJUGADOR ONLINE =====';
   const start = html.indexOf(marker);
   const headEnd = html.indexOf('</head>');
@@ -76,10 +74,10 @@ const rooms = new Map();
 const TOKENS = ['🎒','☕','📱','🚐'];
 
 app.use(express.static(path.join(__dirname, 'public'), {
-  etag: true,
-  maxAge: '1h',
+  etag: false,
+  maxAge: 0,
   setHeaders(res,filePath){
-    if(filePath.endsWith('index.html')) res.setHeader('Cache-Control','no-store');
+    if(filePath.endsWith('index.html')) res.setHeader('Cache-Control','no-store, no-cache, must-revalidate');
   }
 }));
 app.get('/health', (_req,res)=>res.json({ok:true,rooms:rooms.size}));
